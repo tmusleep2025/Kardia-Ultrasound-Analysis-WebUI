@@ -1,0 +1,32 @@
+<!-- flask/templates/index.html -->
+{% extends "layout.html" %}
+{% block content %}
+<div class="container mt-5">
+  <h1 class="text-center mb-4">ECG Analysis System</h1>
+
+  {% if analysis_in_progress %}
+    <div class="alert alert-info">
+      The system is currently processing an audio file, please try again later.
+    </div>
+  {% else %}
+    <div class="mb-4">
+      <form method="POST" action="{{ url_for('upload') }}" enctype="multipart/form-data">
+        <div class="card p-4 shadow-sm">
+          <div class="mb-3">
+            <label for="file" class="form-label">Upload a .wav file (single file)</label>
+            <input class="form-control" type="file" name="file" id="file" required>
+          </div>
+          <button type="submit" class="btn btn-primary w-100">Start New Analysis</button>
+        </div>
+      </form>
+    </div>
+    {% if has_old_result %}
+      <div class="mb-4 text-center">
+        <a class="btn btn-success" href="{{ url_for('result_page') }}">
+          View Last Analysis Report
+        </a>
+      </div>
+    {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

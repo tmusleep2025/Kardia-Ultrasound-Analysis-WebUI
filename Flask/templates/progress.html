@@ -1,0 +1,52 @@
+<!-- flask/templates/progress.html -->
+{% extends "layout.html" %}
+{% block content %}
+<div class="container progress-container">
+  <h2 class="text-center">Analyzing audio file, please wait...</h2>
+  <div class="mb-3 text-center" id="status-text">Preparing...</div>
+  <div class="progress" style="height: 30px;">
+    <div class="progress-bar progress-bar-striped progress-bar-animated" 
+         id="progress-bar" 
+         role="progressbar" 
+         style="width: 0%;">
+    </div>
+  </div>
+</div>
+
+<script>
+  // Poll /progress_status every 1 second
+  const progressBar = document.getElementById("progress-bar");
+  const statusText = document.getElementById("status-text");
+
+  function fetchProgress() {
+    fetch("{{ url_for('progress_status') }}")
+      .then(response => response.json())
+      .then(data => {
+        const { status, progress, total_steps, done, error } = data;
+
+        statusText.textContent = status;
+        let percent = 0;
+        if (total_steps > 0) {
+          percent = Math.round((progress / total_steps) * 100);
+        }
+        progressBar.style.width = percent + "%";
+        progressBar.textContent = percent + "%";
+
+        if (error) {
+          alert("An error occurred during analysis: " + error);
+          window.location.href = "{{ url_for('index') }}";
+          return;
+        }
+        if (done) {
+          window.location.href = "{{ url_for('result_page') }}";
+        }
+      })
+      .catch(err => console.error(err));
+  }
+
+  // Initial call
+  fetchProgress();
+  // Set interval to call every 1 second
+  setInterval(fetchProgress, 1000);
+</script>
+{% endblock %}
