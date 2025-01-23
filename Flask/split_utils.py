@@ -145,9 +145,9 @@ def plot_results_from_csv(csv_filename='ecg_results.csv', segment_duration=30, o
 
         # 新增圖例
         legend_elements = [
-            Patch(facecolor=color_map["1"], label='State 1: No Signal'),
-            Patch(facecolor=color_map["2"], label='State 2: Strong Fluctuation'),
-            Patch(facecolor=color_map["3"], label='State 3: RR Validation Failure')
+            Patch(facecolor=color_map["1"], label='State 1: Signal lost'),
+            Patch(facecolor=color_map["2"], label='State 2: Signal shift'),
+            Patch(facecolor=color_map["3"], label='State 3: Interference')
         ]
         axs[0].legend(handles=legend_elements, loc='upper right')
 

@@ -155,63 +155,66 @@ class ECGAnalyzer:
         return stats
 
     @staticmethod
-    def post_process_r_peaks(r_peak_times, r_peak_features, time_axis, squared_second_deriv, 
-                             min_rr=0.5, max_rr=1.75, morphology_window=0.05, prominence_factor=2.0):
+    def post_process_r_peaks(r_peak_times, r_peak_features, min_rr=0.5, max_rr=1.75):
         """
         Post-process detected R peaks to check morphology and RR interval validity.
-        對偵測到的 R 波進行後處理，檢查形態與 RR 間期合理性。
+        對偵測到的 R 波進行後處理，檢查 RR 間期合理性。
         """
-        valid_indices = []
-        fs = 1 / (time_axis[1] - time_axis[0])
-        sample_window = int(morphology_window * fs)
-        
-        # 形態學檢查 R 波
-        for i, r_time in enumerate(r_peak_times):
-            idx = np.argmin(np.abs(time_axis - r_time))
-            start = max(idx - sample_window, 0)
-            end = min(idx + sample_window, len(squared_second_deriv) - 1)
-            local_window = squared_second_deriv[start:end+1]
-            local_peak = squared_second_deriv[idx]
-            if local_peak == np.max(local_window) and local_peak > prominence_factor * np.mean(local_window):
-                valid_indices.append(i)
-        
-        morphology_filtered_times = [r_peak_times[i] for i in valid_indices]
-        morphology_filtered_features = [r_peak_features[i] for i in valid_indices]
-        
         filtered_r_peak_times = []
         filtered_r_peak_features = []
+        valid_rr_intervals = []
         
-        if morphology_filtered_times:
-            filtered_r_peak_times.append(morphology_filtered_times[0])
-            filtered_r_peak_features.append(morphology_filtered_features[0])
+        if r_peak_times:
+            filtered_r_peak_times.append(r_peak_times[0])
+            filtered_r_peak_features.append(r_peak_features[0])
         
-        # RR 間期檢查
-        for i in range(1, len(morphology_filtered_times)):
-            rr_interval = morphology_filtered_times[i] - morphology_filtered_times[i-1]
-            if min_rr <= rr_interval <= max_rr:
-                filtered_r_peak_times.append(morphology_filtered_times[i])
-                filtered_r_peak_features.append(morphology_filtered_features[i])
-        
-        return filtered_r_peak_times, filtered_r_peak_features
+        # RR 間期檢查（當前與前後各一個）
+        for i in range(len(r_peak_times)):
+            if i == 0:  # 第一個點，只能與下一個點比較
+                rr_next = r_peak_times[i + 1] - r_peak_times[i]
+                if min_rr <= rr_next <= max_rr:
+                    valid_rr_intervals.append(rr_next)
+                    filtered_r_peak_times.append(r_peak_times[i])
+                    filtered_r_peak_features.append(r_peak_features[i])
+
+            elif i == len(r_peak_times) - 1:  # 最後一個點，只能與前一個點比較
+                rr_prev = r_peak_times[i] - r_peak_times[i - 1]
+                if min_rr <= rr_prev <= max_rr:
+                    valid_rr_intervals.append(rr_prev)
+                    filtered_r_peak_times.append(r_peak_times[i])
+                    filtered_r_peak_features.append(r_peak_features[i])
+
+            else:  # 中間的點，與前後點比較
+                rr_prev = r_peak_times[i] - r_peak_times[i - 1]
+                rr_next = r_peak_times[i + 1] - r_peak_times[i]
+                if min_rr <= rr_prev <= max_rr or min_rr <= rr_next <= max_rr:
+                    valid_rr_intervals.append(rr_prev if min_rr <= rr_prev <= max_rr else rr_next)
+                    filtered_r_peak_times.append(r_peak_times[i])
+                    filtered_r_peak_features.append(r_peak_features[i])
+
+        return filtered_r_peak_times, filtered_r_peak_features, valid_rr_intervals
 
     @staticmethod
-    def wavelet_denoise(signal, wavelet='db4', level=3):
+    def wavelet_denoise(signal, wavelet='db4', level=9, remove_levels=None):
         """
-        Denoise the signal using wavelet decomposition and reconstruction.
         使用小波分解與重建對訊號進行降噪。
+        
+        :param signal: 要降噪的訊號
+        :param wavelet: 小波基函數名稱 (預設為 'db4')
+        :param level: 分解層級 (預設為 9)
+        :param remove_levels: 需要歸零的層級 (默認去除[0, 1, 2, 3, 8, 9])
+        :return: 降噪後的訊號
         """
         coeffs = pywt.wavedec(signal, wavelet, level=level)
-        coeffs[0] = np.zeros_like(coeffs[0])
-        coeffs[1] = np.zeros_like(coeffs[1])
-        return pywt.waverec(coeffs, wavelet)
+        
+        if remove_levels is None:
+            remove_levels = [0, 1, 2, 3, 9]  # 預設要去除的層級
 
-    @staticmethod
-    def moving_std(signal, window_size=200):
-        """
-        Compute moving standard deviation over a specified window size.
-        在指定視窗大小下計算移動標準差。
-        """
-        return np.array([np.std(signal[i:i+window_size]) for i in range(len(signal)-window_size)])
+        for i in remove_levels:
+            if i < len(coeffs):
+                coeffs[i] = np.zeros_like(coeffs[i])
+
+        return pywt.waverec(coeffs, wavelet)
 
     def process_audio(self):
         """
@@ -223,13 +226,14 @@ class ECGAnalyzer:
             audio_data = audio_data[:, 0]
 
         # 帶通濾波：18500-19300 Hz
+        freq_min = 18500  # 18.5 kHz
+        freq_max = 19300  # 19.3 kHz
+
         bandpass_high = ButterworthFilter(
-            'band', cutoff=None, fs=sample_rate, order=5, lowcut=18500, highcut=19300
+            'band', cutoff=None, fs=sample_rate, order=5, lowcut=freq_min, highcut=freq_max
         )
         filtered_audio = bandpass_high.apply(audio_data)
-
-        frequencies, times, Sxx = spectrogram(filtered_audio, fs=sample_rate, nperseg=16384, noverlap=8192)
-
+        
         # 檢查信號強度
         if np.std(filtered_audio) < 10:
             # print("⚠️ No Signal")
@@ -245,25 +249,44 @@ class ECGAnalyzer:
                 "filtered_audio_std": np.std(filtered_audio)
             }
             return self.ecg_stats, None
+        
+        frequencies, times, Sxx = spectrogram(filtered_audio, fs=sample_rate, nperseg=16384, noverlap=8192)
 
-        # 希爾伯特變換取得包絡線並重採樣
-        analytic_signal = hilbert(filtered_audio)
-        amplitude_envelope = np.abs(analytic_signal)
+        # 篩選頻率範圍
+        freq_indices = np.where((frequencies >= freq_min) & (frequencies <= freq_max))[0]
+        filtered_frequencies = frequencies[freq_indices]
+        filtered_Sxx = Sxx[freq_indices, :]
 
-        desired_fs = 200  
-        new_length = int(len(amplitude_envelope) * desired_fs / sample_rate)
-        amplitude_envelope = resample(amplitude_envelope, new_length)
-        amplitude_envelope = self.wavelet_denoise(amplitude_envelope)
+        # 計算每個時間點最大振幅的頻率
+        max_indices = np.argmax(filtered_Sxx, axis=0)
+        max_frequencies = filtered_frequencies[max_indices]
 
-        # 計算移動標準差檢查訊號波動
-        moving_std_values = self.moving_std(amplitude_envelope, window_size=desired_fs)
-        threshold_value = 1.8 * np.mean(moving_std_values)
-        threshold_duration_seconds = 7.5
-        threshold_samples = threshold_duration_seconds * desired_fs
-        exceeding_threshold = moving_std_values > threshold_value
-        total_exceeding_samples = np.sum(exceeding_threshold)
-        if total_exceeding_samples >= threshold_samples:
-            # print(f"⚠️ Signal has strong fluctuation over {threshold_duration_seconds} seconds ({total_exceeding_samples})")
+        # 設定滑動窗口參數
+        window_size = 1.0  # 1秒的窗口
+        step_size = 0.25   # 每次移動0.25秒
+
+        # 轉換窗口大小和步長為索引數
+        window_samples = int(window_size / (times[1] - times[0]))  # 窗口大小對應索引
+        step_samples = int(step_size / (times[1] - times[0]))  # 步長對應索引
+
+        # 計算滑動標準差
+        std_devs = []
+        time_stamps = []
+        threshold = 100  # 設定異常標準差閾值
+
+        for start in range(0, len(times) - window_samples + 1, step_samples):
+            window_data = max_frequencies[start:start + window_samples]
+            std_dev = np.std(window_data)
+            std_devs.append(std_dev)
+            time_stamps.append(times[start + window_samples - 1])
+
+        # 標記異常點
+        anomalies =  np.array(std_devs) > threshold
+
+        anomalous_time = np.sum(anomalies) * step_size  # 每個異常點代表 step_size 秒
+
+        if (anomalous_time > 5):
+            # print(f"⚠️ Signal has strong fluctuation over 5 sec ({anomalous_time})")
             self.ecg_stats = {
                 "Number of R Waves": 0,
                 "Avg. RR Interval (s)": 0,
@@ -273,9 +296,20 @@ class ECGAnalyzer:
                 "Max RR Interval (s)": 0,
                 "Average Heart Rate (bpm)": "N/A",
                 "state": 2,
-                "total_exceeding_samples": total_exceeding_samples
+                "total_exceeding_samples": anomalous_time
             }
             return self.ecg_stats, None
+        
+        # 希爾伯特變換取得包絡線並重採樣
+        analytic_signal = hilbert(filtered_audio)
+        amplitude_envelope = np.abs(analytic_signal)
+
+        desired_fs = 200  
+        new_length = int(len(amplitude_envelope) * desired_fs / sample_rate)
+        amplitude_envelope = resample(amplitude_envelope, new_length)
+        amplitude_envelope = self.wavelet_denoise(amplitude_envelope)
+
+
 
         dt = 1.0 / desired_fs
         time_axis = np.arange(len(amplitude_envelope)) / desired_fs
@@ -298,28 +332,67 @@ class ECGAnalyzer:
         filter_test = ButterworthFilter('band', cutoff=None, fs=desired_fs, order=1, lowcut=1, highcut=10)
         squared_second_deriv = filter_test.apply(squared_second_deriv)
 
-        # R 波偵測
-        r_peak_times, r_peak_features, dynamic_thresholds_1, dynamic_thresholds_2 = self.detect_r_peaks(
-            time_axis, squared_second_deriv, self.refractory_period, new_length
-        )
 
-        # 後處理 R 波
-        filtered_r_peak_times, filtered_r_peak_features = self.post_process_r_peaks(
-            r_peak_times, r_peak_features, time_axis, squared_second_deriv,
-            min_rr=0.5, max_rr=1.75, morphology_window=0.025, prominence_factor=1.0
-        )
 
-        if len(filtered_r_peak_times) > 1:
-            valid_rr_intervals = np.diff(filtered_r_peak_times)
-        else:
-            valid_rr_intervals = np.array([])
 
-        self.ecg_stats = self.calculate_ecg_statistics(valid_rr_intervals)
+        from scipy.fftpack import fft
+        from scipy.signal import find_peaks
 
-        # 簡單檢查 RMSSD 是否異常
-        if ("RMSSD (s)" in self.ecg_stats 
-            and float(self.ecg_stats["RMSSD (s)"]) > 1):
-            # print("⚠️ RR val fail")
+        # 假設 amplitude_envelope 已經存在
+        time = np.arange(len(squared_second_deriv)) * 0.005
+
+        # 設定滑動窗口參數
+        window_size_sec = 5  # 設定窗口大小為5秒
+        overlap_ratio = 0.925  # 設定重疊比率為90%
+        T = time[1] - time[0]  # 時間間隔
+        window_size = int(window_size_sec / T)
+        step_size = max(1, int(window_size * (1 - overlap_ratio)))
+
+        detected_periods = []
+        window_start_times = []
+
+        # 滑動窗口週期檢測
+        for start in range(0, len(squared_second_deriv) - window_size + 1, step_size):
+            segment = squared_second_deriv[start:start + window_size]
+            
+            # 執行 FFT 分析
+            segment_fft = np.abs(fft(segment)[:window_size // 2])
+            segment_freqs = np.fft.fftfreq(window_size, d=T)[:window_size // 2]
+            
+            # 找出主要頻率
+            peak_indices, _ = find_peaks(segment_fft, height=segment_fft.max() * 0.1)
+            
+            dominant_period = 1 / segment_freqs[peak_indices[0]] if peak_indices.size > 0 and segment_freqs[peak_indices[0]] > 0 else None
+            
+            detected_periods.append(dominant_period)
+            window_start_times.append(time[start])
+
+        # 找出連續5個 detected_periods 超過2的區域
+        threshold = 1.5
+        consecutive_count = 4
+        exceeding_indices = [i for i in range(len(detected_periods) - consecutive_count + 1) if all(p and p > threshold for p in detected_periods[i:i + consecutive_count])]
+        
+        # 設置所有起始時間與結束時間範圍內的 amplitude_envelope 為0
+        for idx in exceeding_indices:
+            start_time = window_start_times[idx]
+            end_time = window_start_times[idx + consecutive_count - 1] + 5
+            squared_second_deriv[(time >= start_time) & (time <= end_time)] = 0
+
+        # 繪製結果
+        # plt.figure(figsize=(12, 6))
+        # plt.plot(window_start_times, detected_periods, marker='o', linestyle='-', label='Detected Period (5-sec Window, 90% Overlap)')
+        # for idx in exceeding_indices:
+        #     plt.plot(window_start_times[idx:idx + consecutive_count], detected_periods[idx:idx + consecutive_count], 'ro', label='Exceeding Threshold' if idx == exceeding_indices[0] else "")
+        # plt.xlabel('Time (s)')
+        # plt.ylabel('Detected Period (Seconds)')
+        # plt.title('Sliding Window (5-sec, 90% Overlap) Analysis of Detected Period')
+        # plt.grid(True)
+        # plt.legend()
+        # plt.show()
+
+        if np.sum(squared_second_deriv == 0) > 10 * 200:
+            print("⚠️ TTTT")
+            print(np.sum(squared_second_deriv == 0))
             self.ecg_stats = {
                 "Number of R Waves": 0,
                 "Avg. RR Interval (s)": 0,
@@ -329,10 +402,20 @@ class ECGAnalyzer:
                 "Max RR Interval (s)": 0,
                 "Average Heart Rate (bpm)": "N/A",
                 "state": 3,
-                "rmssd_value": self.ecg_stats["RMSSD (s)"],
-                "total_exceeding_samples": total_exceeding_samples
             }
             return self.ecg_stats, None
+
+        # R 波偵測
+        r_peak_times, r_peak_features, dynamic_thresholds_1, dynamic_thresholds_2 = self.detect_r_peaks(
+            time_axis, squared_second_deriv, self.refractory_period, new_length
+        )
+
+        # 後處理 R 波
+        filtered_r_peak_times, filtered_r_peak_features, valid_rr_intervals = self.post_process_r_peaks(
+            r_peak_times, r_peak_features, min_rr=self.refractory_period, max_rr=1.5
+        )
+
+        self.ecg_stats = self.calculate_ecg_statistics(valid_rr_intervals)
 
         self.plot_data = {
             "time_axis": time_axis,
@@ -341,9 +424,6 @@ class ECGAnalyzer:
             "Sxx": Sxx,
             "squared_second_deriv": squared_second_deriv,
             "amplitude_envelope": amplitude_envelope,
-            "moving_std_values": moving_std_values,
-            "exceeding_threshold": exceeding_threshold,
-            "threshold_value": threshold_value,
             "r_peak_times": filtered_r_peak_times,
             "r_peak_features": filtered_r_peak_features,
             "dynamic_thresholds_1": dynamic_thresholds_1,
@@ -382,6 +462,7 @@ class ECGAnalyzer:
         r_peak_times = self.plot_data["r_peak_times"]
         r_peak_features = self.plot_data["r_peak_features"]
 
+    
         # 繪製圖表
         fig, axs = plt.subplots(3, 1, figsize=(18, 32), constrained_layout=True)
 
@@ -392,11 +473,10 @@ class ECGAnalyzer:
         axs[0].set_title('original KardiaMobile ultrasonic spectrogram (18.5-19.3 kHz)')
         axs[0].set_ylim(18500, 19300)
         # fig.colorbar(pcm, ax=axs[0], label='Intensity [dB]')
-
         axs[1].plot(t, amplitude_envelope, color='orange')
         axs[1].set_ylabel('Amplitude')
         axs[1].set_xlabel('Time [s]')
-        axs[1].set_xlim(0, 60)
+        axs[1].set_xlim(0, t[len(t)-1])
         axs[1].set_title('original KardiaMobile ultrasonic amplitude')
         
         axs[2].plot(t, squared_second_deriv, label="enhanced Signal", color='blue')
@@ -406,7 +486,7 @@ class ECGAnalyzer:
         axs[2].set_xlabel("Time (s)")
         axs[2].set_ylabel("Feature Amplitude")
         axs[2].set_title("enhanced algorithm")
-        axs[2].set_xlim(0, 60)
+        axs[2].set_xlim(0, t[len(t)-1])
         axs[2].legend(loc='upper right')
 
         plt.subplots_adjust(left=0.06, right=0.99, top=0.955, bottom=0.05, hspace=0.3, wspace=0.2)
@@ -430,13 +510,8 @@ class ECGAnalyzer:
         Sxx = self.plot_data["Sxx"]
         squared_second_deriv = self.plot_data["squared_second_deriv"]
         amplitude_envelope = self.plot_data["amplitude_envelope"]
-        dynamic_thresholds_1 = self.plot_data["dynamic_thresholds_1"]
-        dynamic_thresholds_2 = self.plot_data["dynamic_thresholds_2"]
         r_peak_times = self.plot_data["r_peak_times"]
         r_peak_features = self.plot_data["r_peak_features"]
-        moving_std_values = self.plot_data["moving_std_values"]
-        threshold_value = self.plot_data["threshold_value"]
-        exceeding_threshold = self.plot_data["exceeding_threshold"]
 
 
 
@@ -496,5 +571,10 @@ class ECGAnalyzer:
 # ============================
 # analyzer = ECGAnalyzer('./path_to_your_audio.wav', refractory_period=0.5)
 # ecg_stats_only = analyzer.analyze_ecg()
+# ecg_stats, plot_data = analyzer.analyze_and_plot_ecg()
+# print(ecg_stats)
+
+
+# analyzer = ECGAnalyzer(r"C:\Users\User\Documents\GitHub\Kardia_Flask_WebUI\Flask\uploads\segment_30.wav", refractory_period=0.5)
 # ecg_stats, plot_data = analyzer.analyze_and_plot_ecg()
 # print(ecg_stats)

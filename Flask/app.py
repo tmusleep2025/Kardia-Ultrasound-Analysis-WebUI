@@ -210,6 +210,7 @@ def background_analysis(upload_path):
             ecg_stats = analyzer.analyze_ecg()
 
             avg_hr = ecg_stats.get("Average Heart Rate (bpm)", "N/A")
+            hrv = ecg_stats.get("RMSSD (s)", "N/A")
             state = ecg_stats.get("state", None)
             if state in ['1', 1, '2', 2, '3', 3]:
                 total_unanalyzable_secs += seg_duration
@@ -229,6 +230,7 @@ def background_analysis(upload_path):
                 'segment_start': idx * seg_duration,
                 'segment_end': idx * seg_duration + seg_duration,
                 'avg_hr': avg_hr,
+                'rmssd': hrv,
                 'state': state if state else 'OK'
             })
 
