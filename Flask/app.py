@@ -1,293 +1,232 @@
-# flask/app.py
-# -*- coding: utf-8 -*-
 import os
-import shutil
-import threading
-import time
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for matplotlib
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
+from flask import Flask, request, render_template, jsonify, url_for, make_response
 from werkzeug.utils import secure_filename
-
-from alivecor_package import ECGAnalyzer  # Assuming you have ECG analysis logic
-from split_utils import split_audio, save_results_to_csv, plot_results_from_csv 
+import pandas as pd
 import numpy as np
+from ECGAnalyzer import ECGAnalyzer  # Ensure ECGAnalyzer is available in your PYTHONPATH
 
-print("=== Set environment variables ===")
-
-app = Flask(__name__)
-app.secret_key = 'some_secret_key'  # Please replace with a secure key
-
-# Set upload limit (e.g., maximum 16MB)
-app.config["MAX_CONTENT_LENGTH"] = 4096 * 1024 * 1024  # 16MB
-
+UPLOAD_FOLDER = './uploads'
 ALLOWED_EXTENSIONS = {'wav'}
 
-# Global variable to store the current analysis status (single user/single task)
-analysis_status = {
-    'status': 'idle',      # Text description: idle / preparing / analyzing segment n / creating CSV / plotting charts / completed / failed
-    'progress': 0,         # Number of completed steps
-    'total_steps': 1,      # Total number of steps
-    'done': False,         # Whether the analysis is completed
-    'error': None,         # Error message (if any)
-    'results': None        # Analysis results: includes summary and segments
-}
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Global variables to store the ECGAnalyzer instance and latest hrv_stats_df
+ecg_analyzer = None
+last_hrv_stats_df = None
 
 def allowed_file(filename):
-    """Check if the file has an allowed format"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.route('/')
+@app.route('/', methods=['GET'])
 def index():
-    """
-    Home Page:
-      - If analysis is in progress, display a message and disable upload
-      - If analysis is completed (or not started), allow choosing [Start New Analysis] or [View Last Analysis Results] (if results exist)
-    """
-    in_progress = (analysis_status['status'] != 'idle' and not analysis_status['done'])
-    has_old_result = analysis_status['done'] and (analysis_status['results'] is not None)
-    return render_template('index.html',
-                           analysis_in_progress=in_progress,
-                           has_old_result=has_old_result)
+    """Display the file upload page."""
+    return render_template('index.html')
 
 @app.route('/upload', methods=['POST'])
-def upload():
+def upload_file():
     """
-    Receive uploaded file and start a new analysis process (delete old files and reset status)
+    Upload the .wav file, perform ECG analysis, and generate the report.
+    
+    The process_audio() method returns an hrv_stats_df DataFrame with columns:
+      - "Start Time (s)"
+      - "30s_End Time (s)"
+      - "Avg HR (BPM)"
+      - "SDNN (ms)"
+      - "RMSSD (ms)"
+      - "SD1 (ms)"
+      - "SD2 (ms)"
+      - "Poincare S (ms^2)"
+      - "SD1/SD2"
+      - "R Peak total"
     """
-    # If analysis is still in progress, do not allow another upload
-    if (analysis_status['status'] != 'idle') and (not analysis_status['done']):
-        flash("The system is still processing the previous audio file. Please wait for the analysis to complete before uploading again.")
-        return redirect(url_for('index'))
+    global ecg_analyzer, last_hrv_stats_df
 
-    # Check if the file part is present
     if 'file' not in request.files:
-        flash("No file selected.")
-        return redirect(url_for('index'))
+        return "No file part", 400
 
     file = request.files['file']
     if file.filename == '':
-        flash("No file selected.")
-        return redirect(url_for('index'))
+        return "No selected file", 400
 
     if file and allowed_file(file.filename):
-        # Remove previous results (if any)
-        uploads_dir = os.path.join(app.root_path, 'uploads')
-        if os.path.exists(uploads_dir):
-            shutil.rmtree(uploads_dir)
-        os.makedirs(uploads_dir, exist_ok=True)
-
-        # Reset analysis_status
-        analysis_status.update({
-            'status': 'Preparing...',
-            'progress': 0,
-            'total_steps': 1,  # Initial number of steps (to be updated in background task)
-            'done': False,
-            'error': None,
-            'results': None
-        })
-
-        # Save the uploaded file
         filename = secure_filename(file.filename)
-        upload_path = os.path.join(uploads_dir, filename)
-        file.save(upload_path)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
 
-        # Start background analysis
-        thread = threading.Thread(target=background_analysis, args=(upload_path,))
-        thread.start()
+        # Create an instance of ECGAnalyzer and process the audio file.
+        ecg_analyzer = ECGAnalyzer(filepath)
+        hrv_stats_df = ecg_analyzer.process_audio()
 
-        return redirect(url_for('progress_page'))
-    else:
-        flash("Only .wav file format is allowed.")
-        return redirect(url_for('index'))
+        # Store the DataFrame globally for CSV export
+        last_hrv_stats_df = hrv_stats_df.copy()
 
-@app.route('/progress')
-def progress_page():
-    """
-    Display the analysis progress page
-    """
-    return render_template('progress.html')
+        # -------------------------------
+        # Compute Overall Summary Metrics
+        # -------------------------------
+        # Each segment is 30 seconds → convert to minutes.
+        segment_duration_min = 30 / 60.0
+        total_segments = len(hrv_stats_df)
+        total_analysis_time_min = total_segments * segment_duration_min
 
-@app.route('/progress_status')
-def progress_status():
-    """
-    API endpoint for the frontend to poll and get analysis progress
-    """
-    return jsonify({
-        'status': analysis_status['status'],
-        'progress': analysis_status['progress'],
-        'total_steps': analysis_status['total_steps'],
-        'done': analysis_status['done'],
-        'error': analysis_status['error']
-    })
+        # Convert Avg HR to numeric and filter valid segments.
+        hrv_stats_df["Avg HR (BPM)_num"] = pd.to_numeric(hrv_stats_df["Avg HR (BPM)"], errors='coerce')
+        analyzable_segments = hrv_stats_df[hrv_stats_df["Avg HR (BPM)_num"].notnull()]
+        analyzable_count = len(analyzable_segments)
+        analyzable_time_min = analyzable_count * segment_duration_min
+        unanalyzable_time_min = total_analysis_time_min - analyzable_time_min
+        analysis_percent = (analyzable_time_min / total_analysis_time_min * 100) if total_analysis_time_min > 0 else 0
+        unanalyzable_percent = 100 - analysis_percent
 
-@app.route('/result')
-def result_page():
-    """
-    Display results after analysis is complete (including tables and generated charts)
-    """
-    # If not completed, redirect to progress page
-    if not analysis_status['done']:
-        return redirect(url_for('progress_page'))
+        # Compute Total Heart Variation using RMSSD (ms) average over valid segments.
+        analyzable_segments["RMSSD (ms)_num"] = pd.to_numeric(analyzable_segments["RMSSD (ms)"], errors='coerce')
+        if analyzable_count > 0:
+            total_heart_variation = analyzable_segments["RMSSD (ms)_num"].mean()
+        else:
+            total_heart_variation = np.nan
 
-    # If there was an error, redirect to home page and display error
-    if analysis_status['error']:
-        flash(f"An error occurred during analysis: {analysis_status['error']}")
-        return redirect(url_for('index'))
+        summary = {
+            "total_analysis_time_min": round(total_analysis_time_min, 2),
+            "analysis_time_min": round(analyzable_time_min, 2),
+            "analysis_percent": round(analysis_percent, 2),
+            "unanalyzable_time_min": round(unanalyzable_time_min, 2),
+            "unanalyzable_percent": round(unanalyzable_percent, 2),
+            "total_heart_variation": round(total_heart_variation, 2) if not np.isnan(total_heart_variation) else "N/A"
+        }
 
-    # Get results
-    if not analysis_status['results']:
-        flash("No analysis results available.")
-        return redirect(url_for('index'))
+        # -------------------------------
+        # Generate Combined Chart: Heart Rate (Left Y-axis) & RMSSD (Right Y-axis)
+        # -------------------------------
+        avg_hr_data = []
+        rmssd_data = []
+        for i, row in hrv_stats_df.iterrows():
+            segment_index = i + 1
+            avg_hr_value = row.get("Avg HR (BPM)_num", None)
+            rmssd_value = row.get("RMSSD (ms)", None)
+            
+            # 轉換為數字（若無法轉換則為 NaN）
+            avg_hr_value = pd.to_numeric(avg_hr_value, errors='coerce')
+            rmssd_value = pd.to_numeric(rmssd_value, errors='coerce')
+            
+            if pd.notnull(avg_hr_value):
+                avg_hr_data.append((segment_index, avg_hr_value))
+            if pd.notnull(rmssd_value):
+                rmssd_data.append((segment_index, rmssd_value))
 
-    results = analysis_status['results']
-    summary = results['summary']
-    segments = results['segments']
-    filename = results['filename']
+        chart_dir = os.path.join('static', 'images')
+        if not os.path.exists(chart_dir):
+            os.makedirs(chart_dir)
+        output_png = os.path.join(chart_dir, 'chart.png')
 
-    # Generated report image (report.png) is already created in background_analysis => uploads/report.png
-    report_png_path = os.path.join(app.root_path, 'uploads', 'report.png')
-    report_exists = os.path.isfile(report_png_path)
-
-    return render_template('result.html',
-                           summary=summary,
-                           segment_results=segments,
-                           filename=filename,
-                           report_exists=report_exists)
-
-@app.route('/uploads/<path:filename>')
-def uploaded_file(filename):
-    """
-    Provide access to uploaded and analyzed temporary files for download or display
-    """
-    uploads_dir = os.path.join(app.root_path, 'uploads')
-    return send_from_directory(directory=uploads_dir, path=filename)
-
-
-def background_analysis(upload_path):
-    """
-    Background Task:
-      1) Split audio file
-      2) Analyze each segment
-      3) Generate CSV
-      4) Plot charts based on CSV
-    """
-    try:
-        analysis_status['status'] = "Splitting audio file..."
-        time.sleep(0.5)  # Simulate processing time
-        min_duration = 30
-        segments = split_audio(upload_path, segment_duration=30)
-        if not segments:
-            raise ValueError("Unable to split audio file or the file is empty.")
-        # 過濾片段
-        segments = [
-            (data, sr) for data, sr in segments
-            if len(data) / sr >= min_duration
-        ]
-        if not segments:
-            raise ValueError("No audio segments meet the minimum duration requirement.")
-
-        # Total steps: splitting (1 step) + analyzing each segment (N steps) + creating CSV (1 step) + plotting (1 step)
-        total_segments = len(segments)
-        analysis_status['total_steps'] = 2 + total_segments  # +1 for CSV, +1 for plotting
-        analysis_status['progress'] = 1  # Splitting completed
-
-        results_per_segment = []
-        heart_rates = []
-        total_analyzable_secs = 0.0
-        total_unanalyzable_secs = 0.0
-        seg_duration = 30
-
-        # Analyze each segment
-        for idx, (segment_data, sample_rate) in enumerate(segments):
-            analysis_status['status'] = f"Analyzing segment {idx+1}/{total_segments}..."
-            # Write temporary segment file
-            from scipy.io import wavfile
-            segment_filename = f"segment_{idx+1}.wav"
-            segment_path = os.path.join(app.root_path, 'uploads', segment_filename)
-            wavfile.write(segment_path, sample_rate, segment_data)
-
-            # Analyze
-            analyzer = ECGAnalyzer(segment_path, refractory_period=0.5)
-            ecg_stats = analyzer.analyze_ecg()
-
-            avg_hr = ecg_stats.get("Average Heart Rate (bpm)", "N/A")
-            hrv = ecg_stats.get("RMSSD (s)", "N/A")
-            state = ecg_stats.get("state", None)
-            if state in ['1', 1, '2', 2, '3', 3]:
-                total_unanalyzable_secs += seg_duration
+        # 檢查是否有任何有效資料
+        if avg_hr_data or rmssd_data:
+            fig, ax1 = plt.subplots(figsize=(8, 4))
+            
+            # Plot: Average HR on ax1 (Left Y-axis, 藍線)
+            if avg_hr_data:
+                xs_avg = [x for (x, hr) in avg_hr_data]
+                ys_avg = [hr for (x, hr) in avg_hr_data]
+                ax1.plot(xs_avg, ys_avg, marker='o', color='blue', label='Heart Rate (bpm)')
+                ax1.set_ylabel("Heart Rate (bpm)", color='blue')
+                ax1.tick_params(axis='y', labelcolor='blue')
+                ax1.set_ylim(0, 120)  # 依需求調整 HR 顯示範圍
+                # 在左軸上繪製參考線 (60, 80, 100 bpm)
+                for yval in [60, 80, 100]:
+                    ax1.axhline(y=yval, color='black', linestyle='--', alpha=0.5)
             else:
-                total_analyzable_secs += seg_duration
-
-            # Collect heart rates
-            try:
-                hr_float = float(avg_hr) if avg_hr != "N/A" else None
-                if hr_float:
-                    heart_rates.append(hr_float)
-            except:
-                pass
-
-            results_per_segment.append({
-                'segment_index': idx+1,
-                'segment_start': idx * seg_duration,
-                'segment_end': idx * seg_duration + seg_duration,
-                'avg_hr': avg_hr,
-                'rmssd': hrv,
-                'state': state if state else 'OK'
+                ax1.set_ylabel("Heart Rate (bpm)")
+            
+            ax1.set_xlabel("Segment (each 30 secs)")
+            ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
+            
+            # Plot: RMSSD on ax2 (Right Y-axis, 紅色虛線)
+            ax2 = ax1.twinx()
+            if rmssd_data:
+                xs_rmssd = [x for (x, val) in rmssd_data]
+                ys_rmssd = [val for (x, val) in rmssd_data]
+                ax2.plot(xs_rmssd, ys_rmssd, marker='o', color='red', linestyle='--', label='HRV (ms)')
+                ax2.set_ylabel("RMSSD (ms)", color='red')
+                ax2.tick_params(axis='y', labelcolor='red')
+                # 視需求設定 HRV 的上下界，例如 ax2.set_ylim(0, 120) 或自動由 matplotlib 決定
+                ax2.set_ylim(0, max(ys_rmssd) + 50)  # 若想自動留一點空間
+            else:
+                ax2.set_ylabel("RMSSD (ms)", color='red')
+            
+            # 加上圖表標題
+            plt.title("Heart Rate and HRV Analysis")
+            
+            # 組合兩個軸的圖例
+            lines1, labels1 = ax1.get_legend_handles_labels()
+            lines2, labels2 = ax2.get_legend_handles_labels()
+            ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper center', ncol=2)
+            
+            plt.tight_layout()
+            plt.savefig(output_png)
+            plt.close(fig)
+        else:
+            # 若沒有任何有效數據，就輸出一個空圖表
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.text(0.5, 0.5, 'No valid HR or RMSSD data available', 
+                    horizontalalignment='center', verticalalignment='center')
+            plt.tight_layout()
+            plt.savefig(output_png)
+            plt.close(fig)
+            
+        # -------------------------------
+        # Prepare Segment Analysis Results Table
+        # -------------------------------
+        segment_results = []
+        for i, row in hrv_stats_df.iterrows():
+            segment_results.append({
+                "segment_index": i + 1,
+                "segment_start": row.get("Start Time (s)", "N/A"),
+                "segment_end": row.get("30s_End Time (s)", "N/A"),
+                "avg_hr": row.get("Avg HR (BPM)", "N/A"),
+                "hrv": row.get("RMSSD (ms)", "N/A")
             })
 
-            # Update progress
-            analysis_status['progress'] += 1
+        # Render the report page with computed data.
+        return render_template('report.html',
+                               summary=summary,
+                               chart_url=url_for('static', filename='images/chart.png'),
+                               segment_results=segment_results)
+    else:
+        return "File type not allowed. Please upload a .wav file.", 400
 
-        # Calculate statistics
-        total_length_sec = total_segments * seg_duration
-        if total_length_sec > 0:
-            analysis_percent = (total_analyzable_secs / total_length_sec) * 100
-            unanalysis_percent = (total_unanalyzable_secs / total_length_sec) * 100
-        else:
-            analysis_percent = 0
-            unanalysis_percent = 0
+@app.route('/export_csv', methods=['GET'])
+def export_csv():
+    """
+    Export the hrv_stats_df data as a CSV file.
+    """
+    global last_hrv_stats_df
+    if last_hrv_stats_df is None:
+        return "No data available for export.", 400
+    
+    csv_data = last_hrv_stats_df.to_csv(index=False)
+    response = make_response(csv_data)
+    response.headers["Content-Disposition"] = "attachment; filename=Results.csv"
+    response.headers["Content-type"] = "text/csv"
+    return response
 
-        # Heart rate standard deviation => total heart variation
-        if len(heart_rates) > 1:
-            total_heart_variation = round(np.std(heart_rates), 2)
-        else:
-            total_heart_variation = "N/A"
+@app.route('/progress', methods=['GET'])
+def get_progress():
+    """Return current analysis progress (for front-end polling)."""
+    global ecg_analyzer
+    if ecg_analyzer is None:
+        return jsonify({
+            "current_chunk": 0,
+            "total_chunks": 0
+        })
+    return jsonify({
+        "current_chunk": ecg_analyzer.current_chunk,
+        "total_chunks": ecg_analyzer.total_chunks
+    })
 
-        # Prepare summary (remove start/stop times)
-        summary = {
-            "total_analysis_time_min": round(total_length_sec / 60.0, 2),
-            "analysis_time_min": round(total_analyzable_secs / 60.0, 2),
-            "analysis_percent": round(analysis_percent, 2),
-            "unanalyzable_time_min": round(total_unanalyzable_secs / 60.0, 2),
-            "unanalyzable_percent": round(unanalysis_percent, 2),
-            "total_heart_variation": total_heart_variation
-        }
-        analysis_status['status'] = "Creating CSV report..."
-        # Generate CSV => uploads/ecg_results.csv
-        csv_path = os.path.join(app.root_path, 'uploads', 'ecg_results.csv')
-        save_results_to_csv(csv_path, results_per_segment, os.path.basename(upload_path))
-        analysis_status['progress'] += 1
-
-        # Plot charts
-        analysis_status['status'] = "Plotting analysis charts..."
-        report_png_path = os.path.join(app.root_path, 'uploads', 'report.png')
-        plot_results_from_csv(csv_filename=csv_path, segment_duration=30, output_png=report_png_path)
-        analysis_status['progress'] += 1
-
-        # Final record
-        analysis_status['results'] = {
-            'filename': os.path.basename(upload_path),
-            'summary': summary,
-            'segments': results_per_segment
-        }
-        analysis_status['status'] = "Analysis Completed"
-        analysis_status['done'] = True
-
-    except Exception as e:
-        analysis_status['error'] = str(e)
-        analysis_status['done'] = True
-        analysis_status['status'] = "Analysis Failed"
-
-
-print("=== Starting Flask application ===")
-if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+if __name__ == '__main__':
+    if not os.path.exists(UPLOAD_FOLDER):
+        os.makedirs(UPLOAD_FOLDER)
+    app.run(debug=True)

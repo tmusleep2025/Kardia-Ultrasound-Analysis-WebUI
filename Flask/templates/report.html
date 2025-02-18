@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Report</title>
+  <!-- Bootstrap CSS -->
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <style>
+    body {
+      background-color: #f8f9fa;
+      margin-top: 20px;
+    }
+    .card {
+      margin-bottom: 20px;
+    }
+    .navbar-brand {
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <a class="navbar-brand" href="#">Kardia Ultrasound Analysis WebUI Report</a>
+    <div class="collapse navbar-collapse">
+      <ul class="navbar-nav ml-auto">
+        <li class="nav-item">
+          <a class="nav-link" href="{{ url_for('index') }}">Home</a>
+        </li>
+      </ul>
+    </div>
+  </nav>
+  
+  <div class="container">
+    <!-- Overall Analysis Summary Card -->
+    <div class="card shadow-sm">
+      <div class="card-header">
+        <h5 class="mb-0">Overall Analysis Summary</h5>
+      </div>
+      <div class="card-body">
+        <table class="table table-bordered">
+          <thead>
+            <tr>
+              <th>Total Analysis Time (minutes)</th>
+              <th>Analyzed Time (minutes / %)</th>
+              <th>Unanalyzed Time (minutes / %)</th>
+              <th>Total Heart Variation<br><small>(Average RMSSD in ms)</small></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>{{ summary.total_analysis_time_min }}</td>
+              <td>{{ summary.analysis_time_min }} / {{ summary.analysis_percent }}%</td>
+              <td>{{ summary.unanalyzable_time_min }} / {{ summary.unanalyzable_percent }}%</td>
+              <td>{{ summary.total_heart_variation }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <!-- Heart Rate Chart Card -->
+    <div class="card shadow-sm">
+      <div class="card-header">
+        <h5 class="mb-0">Heart Rate and HRV by Segment</h5>
+      </div>
+      <div class="card-body text-center">
+        <img src="{{ chart_url }}" alt="Heart Rate Chart" class="img-fluid">
+        <p class="mt-2 text-muted"><small>Reference lines at 60, 80, and 100 bpm are shown.</small></p>
+      </div>
+    </div>
+    
+    <!-- Segment Analysis Results Card with CSV Export Button -->
+    <div class="card shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Segment Analysis Results (30 seconds per segment)</h5>
+        <a href="{{ url_for('export_csv') }}" class="btn btn-primary btn-sm">Export CSV</a>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-hover">
+            <thead>
+              <tr>
+                <th>Segment #</th>
+                <th>Start (sec)</th>
+                <th>End (sec)</th>
+                <th>Average HR (bpm)</th>
+                <th>HRV (ms)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for seg in segment_results %}
+              <tr>
+                <td>{{ seg.segment_index }}</td>
+                <td>{{ seg.segment_start }}</td>
+                <td>{{ seg.segment_end }}</td>
+                <td>
+                  {% if seg.avg_hr != "N/A" %}
+                    {{ "%.1f"|format(seg.avg_hr) }}
+                  {% else %}
+                    {{ seg.avg_hr }}
+                  {% endif %}
+                </td>
+                <td>
+                  {% if seg.hrv != "N/A" %}
+                    {{ "%.1f"|format(seg.hrv) }}
+                  {% else %}
+                    {{ seg.hrv }}
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    
+  </div>
+  
+  <!-- Bootstrap JS and dependencies -->
+  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

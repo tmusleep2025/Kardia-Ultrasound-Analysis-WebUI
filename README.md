@@ -2,7 +2,7 @@
 
 This project is based on the research paper currently under submission in 2025 by Dr. Jowy Tani, Director of the Sleep Center at Taipei Medical University (TMU) Wanfang Hospital, titled [《Feasibility and Validation of a Cost-Effective Continuous Remote Cardiac Monitoring in Clinical Practice and Home-based Application》](#) and has been developed to design the audio algorithmic framework.
 
-This application is based on the Python Flask framework and analyzes ECG ultrasound signal audio files from the Alivrcor KardiaMobile device to perform average heart rate analysis. The application can be used in clinical or home use to enhance heart rate data evaluation for further benefits.
+This application is based on the Python Flask framework and analyzes ECG ultrasound signal audio files from the Alivrcor KardiaMobile device to perform average heart rate (BPM) and heart rate variability (HRV) analysis. The application can be used in clinical or home use to enhance heart rate data evaluation for further benefits.
 
 ---
 
@@ -12,7 +12,8 @@ This application is based on the Python Flask framework and analyzes ECG ultraso
    After uploading an audio file in `.wav` format, the system will automatically analyze the ultrasound ECG signal and generate detailed reports and charts.
 - **Result Display**:  
    - Time-series line charts for further analysis.
-   - Average heart rate (bpm) for every 30-second segment.
+   - Average heart rate (BPM) for every 30-second segment.
+   - Heart rate variability (HRV) for every 30-second segment.
 
 ---
 
@@ -41,7 +42,7 @@ You can obtain the full repository code in the following ways:
    git clone https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI.git
    ```
 
-- Or download the ZIP file and extract it to your local device.
+- Or download the [ZIP file](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/releases/download/v0.3.0/app_v0.3.0.exe) and extract it to your local device.
 
 ---
 
@@ -75,7 +76,7 @@ Follow these steps to analyze the audio data:
 3. **View Results**  
    - After the analysis is complete, the system will generate a report containing:  
       - Time-series line charts  
-      - A table showing the average heart rate (bpm) for every 30 seconds
+      - A table displaying average heart rate (bpm) and HRV for every 30-second segment.
 
 ---
 
@@ -83,15 +84,20 @@ Follow these steps to analyze the audio data:
 
 Below is an example system workflow diagram to help you quickly understand the operation process:
 
-![System Workflow Illustration](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/blob/main/images/Page_Description.png)
+1. Upload .wav audio file on the homepage.
+![Home](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/blob/main/images/Page_Home.png)
 
+2. Wait for system processing.
+![Progress](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/blob/main/images/Page_Progress.png)
+
+3. View the analysis report.
+![report](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/blob/main/images/Page_report.png)
 ---
 
 ## Additional Notes
 
 - This analysis system currently supports **single-user mode only**; running multiple analyses simultaneously may cause abnormal behavior.
 - It is recommended to record audio in a quiet environment to minimize external interference.
-- The system currently supports heart rate ranges between 34-120 bpm; analysis cannot be performed outside this range.
 
 ---
 

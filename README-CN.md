@@ -2,7 +2,7 @@
 
 本專案基於台北醫學大學(TMU)萬芳醫院的睡眠中心主任陳兆煒(Jowy Tani)醫師在2025年正在投稿中的研究文獻[《Feasibility and Validation of a Cost-Effective Continuous Remote Cardiac Monitoring in Clinical Practice and Home-based Application》](#) 中，展示開發的音訊演算法架構
 
-本應用端為基於Python Flask架構，執行分析具有Alivrcor KardiaMobile之ECG超音波訊號音檔，進行平均心律分析之方法應用。應用端可在臨床或是居家檢測時，增加心率數據評估後續其他效益。
+本應用基於 Python Flask 架構，主要用於分析具有Alivrcor KardiaMobile之ECG超音波訊號音檔，並提供 平均心率 (HR) 與心率變異性 (HRV) 分析。應用端可在臨床或是居家檢測時，增加心率數據評估後續其他效益。
 
 ---
 
@@ -11,8 +11,9 @@
 - **ECG 分析**：  
   上傳 `.wav` 格式的音頻文件後，系統將自動分析超音波 ECG 信號，並生成詳細的報告和圖表。
 - **結果顯示**：   
-  - 時間序列折線圖以便進一步分析。
-  - 每30秒區段的平均心率（bpm） 
+  - 時間序列折線圖
+  - 每 30 秒區段的平均心率 (bpm)
+  - 每 30 秒區段的心率變異性 (HRV)
 
 ---
 
@@ -41,8 +42,7 @@
   git clone https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI.git
   ```
 
-- 或者下載 ZIP 壓縮檔並解壓縮至本地設備。
-
+- 或者下載 [ZIP 壓縮檔](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/releases/download/v0.3.0/app_v0.3.0.exe)並解壓縮至本地設備。=
 ---
 
 ### 2. 執行應用程式
@@ -75,7 +75,7 @@
 3. **查看結果**  
    - 分析完成後，系統將產生報告，提供以下內容：  
      - 時間序列折線圖  
-     - 每 30 秒的平均心率（bpm）表格
+     - 每 30 秒的平均心率（bpm）和 心率變異性 (HRV) 的表格
 
 ---
 
@@ -83,7 +83,14 @@
 
 以下是系統的範例流程圖，幫助您快速理解操作流程：
 
-![系統流程示意圖](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/blob/main/images/Page_Description.png)
+1. 進入首頁並上傳 .wav 音頻檔案。
+![Home](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/blob/main/images/Page_Home.png)
+
+2. 等待系統處理數據。
+![Progress](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/blob/main/images/Page_Progress.png)
+
+3. 查看分析報告。
+![report](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/blob/main/images/Page_report.png)
 
 ---
 
@@ -91,8 +98,6 @@
 
 - 本分析系統目前僅支援**單用戶模式**，同時執行多個分析可能會導致異常行為。
 - 建議在安靜環境下錄製音頻，以減少外部干擾。
-- 本分析系統目前僅支援心律範圍在 34-120 bpm之間，如超過此範圍本系統無法正常分析。
-
 ---
 
 ## 授權
@@ -111,5 +116,3 @@
 
 - **GitHub 問題反饋**：  
   在 [GitHub Issues](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/issues) 中提交您的問題或建議。
-
- 
