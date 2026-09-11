@@ -1,5 +1,8 @@
 # Kardia 超音波分析 WebUI
 
+> **v0.5.0（整夜連續狀態管線：命令列工具與 Python API）的說明請見 [README.md](README.md)。**
+> 以下內容描述 `Flask/` 內的 v0.3.0 WebUI（30 秒分段演算法），保留供既有使用者參考。
+
 本專案基於台北醫學大學(TMU)萬芳醫院的睡眠中心主任陳兆煒(Jowy Tani)醫師在2025年正在投稿中的研究文獻[《Feasibility and Validation of a Cost-Effective Continuous Remote Cardiac Monitoring in Clinical Practice and Home-based Application》](#) 中，展示開發的音訊演算法架構
 
 本應用基於 Python Flask 架構，主要用於分析具有Alivrcor KardiaMobile之ECG超音波訊號音檔，並提供 平均心率 (HR) 與心率變異性 (HRV) 分析。應用端可在臨床或是居家檢測時，增加心率數據評估後續其他效益。

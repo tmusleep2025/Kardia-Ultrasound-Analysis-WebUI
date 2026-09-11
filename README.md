@@ -1,119 +1,107 @@
-# Kardia Ultrasound Analysis WebUI
+# Kardia ultrasound single-lead ECG — continuous-state analysis pipeline (v0.5.0)
 
-This project is based on the research paper currently under submission in 2025 by Dr. Jowy Tani, Director of the Sleep Center at Taipei Medical University (TMU) Wanfang Hospital, titled [《Feasibility and Validation of a Cost-Effective Continuous Remote Cardiac Monitoring in Clinical Practice and Home-based Application》](#) and has been developed to design the audio algorithmic framework.
+Recovers an ECG-like waveform and R-peak times from a **smartphone audio recording** of the AliveCor KardiaMobile
+ultrasonic carrier (18.5–19.3 kHz, frequency-modulated by the body-surface voltage), and reports 30-s heart rate (HR)
+and time-domain heart-rate variability (HRV). It replaces the 30-s segment-wise algorithm released as v0.3.0
+([Zenodo 10.5281/zenodo.14886145](https://doi.org/10.5281/zenodo.14886145)).
 
-This application is based on the Python Flask framework and analyzes ECG ultrasound signal audio files from the Alivrcor KardiaMobile device to perform average heart rate (BPM) and heart rate variability (HRV) analysis. The application can be used in clinical or home use to enhance heart rate data evaluation for further benefits.
+The pipeline was validated against polysomnography (PSG) ECG in 58 adults during overnight sleep (development set
+21 participants, hold-out set 37; iPhone and Android recordings). Summary of the hold-out (iPhone) results:
+30-s HR bias 0.20 bpm, SD of difference 2.64 bpm, 94.6% of epochs within ±5 bpm, beat-level sensitivity 0.85 and PPV 0.94
+(150-ms window, ANSI/AAMI EC57). Absolute 30-s HRV is overestimated (timestamp jitter) and should be read as a trend.
 
----
+> Research software. Not a medical device; no diagnostic claims.
 
-## Features
+## Install
 
-- **ECG Analysis**:  
-   After uploading an audio file in `.wav` format, the system will automatically analyze the ultrasound ECG signal and generate detailed reports and charts.
-- **Result Display**:  
-   - Time-series line charts for further analysis.
-   - Average heart rate (BPM) for every 30-second segment.
-   - Heart rate variability (HRV) for every 30-second segment.
+```bash
+pip install git+https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI@v0.5.0
+# or from a local checkout (Python ≥ 3.10; numpy, scipy):
+pip install .
+# or without installing:
+pip install -r requirements.txt
+```
 
----
+Reference environment: the validation outputs were produced with Python 3.12.3, numpy 1.26.4 and scipy 1.15.2. Use these
+versions to reproduce them bit for bit; newer versions run the same algorithm but are not guaranteed to be bit-identical.
 
-## Prerequisites
+## Use
 
-Before using the system, please ensure the following requirements are met:
+```bash
+kardia-ecg recording.wav --out results/
+# equivalent
+python -m kardia_ultrasound_ecg.analyze recording.wav --out results/
+```
 
-1. **Audio Files**:  
-   - The audio format must be `.wav` and should contain ultrasound signals from the Alivecor KardiaMobile (18.5–19.3 kHz).  
-   - It is recommended to record for at least 1 minute to ensure accuracy.
+Input: mono WAV, 48 kHz (the phone's microphone recording; any sample rate that is a multiple of 400 Hz works).
+Outputs in `--out`:
 
-2. **Operating System**:  
-   - OS Supports Windows 10 and above.
+| file | content |
+|---|---|
+| `<stem>_v050_rpeaks.csv` | one row per emitted beat: time (s), instantaneous HR (bpm; 0 when confidence < 0.6), confidence and diagnostics (carrier SNR, in-band prominence, template correlation, level ratio) |
+| `<stem>_v050_30s.csv` | per 30-s epoch: beats, confident beats, mean HR (bpm), RMSSD (ms), SDNN (ms); empty when fewer than 3 confident beats or HR < 40 bpm |
+| `<stem>_v050_summary.json` | duration, beat counts, carrier lock fraction, median carrier-to-noise ratio, comb lines detected |
 
----
+Python API:
 
-## Installation and Usage
+```python
+from kardia_ultrasound_ecg import run_night
+summary = run_night("recording.wav", "v050", "results/")
+```
 
-### 1. Download or Clone the Repository
+## Algorithm (whole night as one stream; every state persists across 4-s blocks)
 
-You can obtain the full repository code in the following ways:
+1. **Comb-interference cancellation** — equally spaced narrow lines (120.17-Hz spacing, mains-harmonic comb coupled into
+   some recordings) are detected and removed with cascaded 3-Hz notch filters, retained for the night.
+2. **Carrier presence and tracking** — every 0.25 s the 18.5–19.3 kHz band is analysed; the carrier is deemed present from
+   *device-independent* features: in-band prominence of the 1-s averaged spectrum (≥ 18 dB to acquire, ≥ 15 dB to keep) and
+   frequency continuity (global peak within ±150 Hz for 1 s). While locked the frequency is smoothed (EMA, 2 s) and searched
+   within ±120 Hz; when lock is lost, detection is suspended.
+3. **Quadrature FM demodulation** — phase-continuous mixing at the tracked carrier → 300-Hz low-pass → instantaneous
+   frequency deviation (limited to ±400 Hz) → decimation to 400 Hz → 0.5–40 Hz. The result is an ECG-like waveform.
+4. **Pan–Tompkins QRS detection** (Pan & Tompkins, 1985) on the demodulated waveform: 15–40-Hz band-pass, squaring, 50-ms
+   moving-window integration, adaptive SPKI/NPKI thresholds, search-back, 3-s dropout re-learning, and an
+   amplitude-and-rhythm contest for candidates closer than 0.45 s.
+5. **Per-beat confidence and emission gate** — carrier-to-noise ratio, threshold ratio, RR consistency and correlation with a
+   continuously adapted QRS template; a beat is emitted only if template correlation ≥ 0.4 or level ratio ≥ 10, the in-band
+   prominence at that moment is ≥ 25 dB, and at least 4 beats fall within ±5 s. 30-s HR uses beats with confidence ≥ 0.6.
 
-- Clone via Git:
+Parameters can be overridden with environment variables (`PT_*`, `CT_*`, `DEMOD_*`; see the module constants). The defaults
+are the frozen v0.5.0 values.
 
-   ```bash
-   git clone https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI.git
-   ```
+## Citation
 
-- Or download the [ZIP file](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/releases/download/v0.3.0/app_v0.3.0.exe) and extract it to your local device.
-
----
-
-### 2. Running the Application
-
-This project provides a ready-to-use `app.exe` file to launch the Web UI:
-
-1. Double-click `app.exe` to start the application. The system will automatically launch the Flask server and run in the background.
-2. Open a web browser (such as Microsoft Edge or Google Chrome) and enter the following URL, then press `Enter`:
-
-   ```
-   http://127.0.0.1:5000
-   ```
-
-![System Startup Illustration](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/blob/main/images/System_Startup_Successful.png)
-
----
-
-### 3. Performing Audio Analysis in the Browser
-
-Follow these steps to analyze the audio data:
-
-1. **Upload Audio File**  
-   - Click "Choose File" to upload the `.wav` file from the Kardia device.  
-   - For testing purposes, please [download](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/blob/main/Flask/audio_files/example_audio_10min.wav) our provided 10-minute test audio file.
-
-2. **Start Analysis**  
-   - After uploading the file, click the **"Start New Analysis"** button.  
-   - The system will display the processing progress; please wait patiently for the analysis to complete.
-
-3. **View Results**  
-   - After the analysis is complete, the system will generate a report containing:  
-      - Time-series line charts  
-      - A table displaying average heart rate (bpm) and HRV for every 30-second segment.
-
----
-
-## Example Usage
-
-Below is an example system workflow diagram to help you quickly understand the operation process:
-
-1. Upload .wav audio file on the homepage.
-![Home](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/blob/main/images/Page_Home.png)
-
-2. Wait for system processing.
-![Progress](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/blob/main/images/Page_Progress.png)
-
-3. View the analysis report.
-![report](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/blob/main/images/Page_report.png)
----
-
-## Additional Notes
-
-- This analysis system currently supports **single-user mode only**; running multiple analyses simultaneously may cause abnormal behavior.
-- It is recommended to record audio in a quiet environment to minimize external interference.
-
----
+If you use this software, please cite the validation paper (in preparation) and the software itself:
+Li C-Y, Tani J. *Kardia Ultrasound Analysis WebUI*, version 0.5.0 (2026). Zenodo. https://doi.org/10.5281/zenodo.14886144
+— the concept DOI, which always resolves to the latest version. Machine-readable metadata is in `CITATION.cff`.
 
 ## License
 
-This project is licensed under the **MIT License**. For details, please refer to the [LICENSE](LICENSE) file.
+MIT (see `LICENSE`). The original WebUI project (v0.3.0) is © 2025 Ching-Yu Li and Jowy Tani, MIT.
 
 ---
 
-## Contact Us
+## Legacy WebUI (v0.3.0)
 
-If you have any questions or suggestions, please contact us via the following methods or submit an issue on GitHub:
+The `Flask/` directory keeps the v0.3.0 web application (30-s segment-wise algorithm) unchanged for existing users; it does
+**not** use the v0.5.0 pipeline above. A ready-to-run Windows build (`app_v0.3.0.exe`) is attached to the
+[v0.3.0 release](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/releases/tag/v0.3.0), and the full WebUI
+instructions are in the [v0.3.0 README](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/tree/v0.3.0#readme)
+([中文](README-CN.md)). v0.3.0 was developed for the study *Feasibility and Validation of a Cost-Effective Continuous Remote
+Cardiac Monitoring in Clinical Practice and Home-based Application* by Dr. Jowy Tani (Sleep Center, Taipei Medical University
+Wanfang Hospital) and is archived at [Zenodo 10.5281/zenodo.14886145](https://doi.org/10.5281/zenodo.14886145).
 
-- **Email**:  
-   - [jowytani@tmu.edu.tw](mailto:jowytani@tmu.edu.tw)  
-   - [tmusleep2025@gmail.com](mailto:tmusleep2025@gmail.com)
+A 10-minute test recording is provided at [`Flask/audio_files/example_audio_10min.wav`](Flask/audio_files/example_audio_10min.wav);
+it can also be analysed with the v0.5.0 command line:
 
-- **GitHub Issue Feedback**:  
-   Submit your issues or suggestions in the [GitHub Issues](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/issues) section.
+```bash
+kardia-ecg Flask/audio_files/example_audio_10min.wav --out results/
+```
+
+## Contact
+
+If you have any questions or suggestions, please contact us or open a
+[GitHub issue](https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI/issues):
+
+- [jowytani@tmu.edu.tw](mailto:jowytani@tmu.edu.tw)
+- [tmusleep2025@gmail.com](mailto:tmusleep2025@gmail.com)

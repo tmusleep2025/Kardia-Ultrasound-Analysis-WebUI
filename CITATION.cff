@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+type: software
+title: "Kardia Ultrasound Analysis WebUI"
+version: "0.5.0"
+date-released: "2026-09-11"
+abstract: >-
+  Recovers an ECG-like waveform and R-peak times from a smartphone audio recording of the
+  AliveCor KardiaMobile ultrasonic carrier (18.5-19.3 kHz, frequency-modulated by the
+  body-surface voltage), and reports 30-s heart rate and time-domain heart-rate variability.
+  Version 0.5.0 processes the whole night as one continuous-state stream: comb-interference
+  cancellation, device-independent carrier presence and tracking, quadrature FM demodulation,
+  Pan-Tompkins QRS detection, and a per-beat confidence and emission gate.
+  Research software; not a medical device.
+authors:
+  - family-names: Li
+    given-names: Ching-Yu
+  - family-names: Tani
+    given-names: Jowy
+license: MIT
+repository-code: "https://github.com/tmusleep2025/Kardia-Ultrasound-Analysis-WebUI"
+keywords:
+  - electrocardiography
+  - heart rate
+  - heart rate variability
+  - ultrasound
+  - smartphone
+  - KardiaMobile
+  - Pan-Tompkins
+  - sleep

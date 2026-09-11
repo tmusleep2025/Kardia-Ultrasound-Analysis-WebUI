@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kardia-ultrasound-ecg"
+version = "0.5.0"
+description = "Continuous-state demodulation and QRS detection for the KardiaMobile ultrasonic single-lead ECG recorded by a smartphone"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "scipy>=1.11"]
+classifiers = ["Programming Language :: Python :: 3", "Topic :: Scientific/Engineering :: Medical Science Apps."]
+
+[project.scripts]
+kardia-ecg = "kardia_ultrasound_ecg.analyze:main"
+
+[tool.setuptools]
+packages = ["kardia_ultrasound_ecg"]
