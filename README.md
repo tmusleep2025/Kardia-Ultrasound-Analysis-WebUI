@@ -71,9 +71,9 @@ are the frozen v0.5.0 values.
 
 ## Citation
 
-If you use this software, please cite the validation paper (in preparation) and the software itself:
-Li C-Y, Tani J. *Kardia Ultrasound Analysis WebUI*, version 0.5.0 (2026). Zenodo. https://doi.org/10.5281/zenodo.14886144
-— the concept DOI, which always resolves to the latest version. Machine-readable metadata is in `CITATION.cff`.
+If you use this software, please cite the validation paper (in preparation) and the Zenodo record of the software:
+https://doi.org/10.5281/zenodo.14886144 (concept DOI, which always resolves to the latest version; version 0.5.0 is
+https://doi.org/10.5281/zenodo.22704873).
 
 ## License
 
